@@ -1,0 +1,878 @@
+public static bool CLT_Wall_Util_Bachelor(double NEd, double NEd_W, double NEd_B, double MEd, double VEd_y, double L, double Hvæg, double T, double LayerAmountNorm, double LayerThicknessXNorm, double LayerThicknessYNorm, double DoubleLayerThicknessNorm, double MatNorm, double BrandbeskytNorm, double BrandTidNorm, double KKNorm, double AKNorm, double Kat_QNorm, double RedNorm, double StandarddimNorm, out List<string> oStateL, out List<double> oUtilL, out double T_min, out double T_max, out double o_Uv, out double o_Um, out double o_Ut, out double o_Uk, out int[] CLTOpbygRes, out int oErrorCounter, out double oCO2_m, out double oPris_m)
+{
+    bool valid = true;
+
+    #region inputs     
+    
+
+    // Predifined Values <-> Immatable values 
+    double mu = 0.4; // Friktionskoefficient Sat til 0.4 fra ettrupsbog
+
+    double Tværlag = 0; //Tværlag iht om vi skal tage hensyn til tværlag i vores evaluator 0 = Slukket 1 = Tændt 
+
+    double t_dæk = 0.2; // Tykkelsen af det gennemsnitlige dæk i meter, denne kan dog være input parameter 
+
+    double b_L = 80; //Bredden af stokke i CLT, kan ændres 
+
+    double forankringsafstand = 0.2; //Forankringsaftsand i meter, samme som i beton, kan også ændret hvis nødvendigt
+
+    int errorCounter = 0;
+
+    List<string> stateL = new List<string>(); // liste til status når constraints bliver overtrådt
+
+    List<double> UtilL = new List<double>(); // liste til status når constraints bliver overtrådt
+
+    double Beta = 0.65; // koefficienten for indbrænding for den 1. dimensionelle brand som man kan regne med, dette kan dog ændres til 0.7, som er for den ikke 1D brand. 
+
+    double k_3 = 1.3; //indbrændingshastigheden der bruges når der delaminerers er 1.3 fra EC5 DKNA for vægge : 1 for dæk på toppen  2 på bunden 
+
+    int Brandsituation = 0; // Hvilken brandsituation vi er, altså om der er brand på begge sider eller kun 1. side, iht om det effektivt er ydervægge, ellers er der formentligt brand på begge sider 
+
+    double Ftd = Domain(T, 0, 1, 0, 306 * 1.142); // [kN]  Trækarmeringen i kN 405 * 1.1 kN / 1.35 = 300kN 405 kN er 2x WHTPT820 beslag 
+
+    double LayerAmountTemp = Domain(LayerAmountNorm, 0, 1, -0.499, 2.4999); // Mapper fra 0 - 2, så vi har 3 typer [3, 5, 7] Lag 
+
+    int LayerAmount = (int)Math.Round(LayerAmountTemp); // Runder til nærmeste heltal
+
+    double DoubleLayerThicknessTemp = Domain(DoubleLayerThicknessNorm, 0, 1, -0.4999, 1.4999); // Hvis 0 har vi enkelt lag, hvis 1 har vi dobbelt lag yderst 
+
+    int DoubleLayerThickness = (int)Math.Round(DoubleLayerThicknessTemp); //Runder til heltal 
+
+    double MEd_y = MEd + VEd_y * Hvæg;
+
+    double AKTemp = Domain(AKNorm, 0, 1, -0.4999, 2.4999);
+
+    int AK = (int)Math.Round(AKTemp);
+
+    int StandardDim = (int)Math.Round(StandarddimNorm);
+
+    double BrandbeskytTemp = Domain(BrandbeskytNorm, 0, 1, -0.4999, 2.4999);
+
+    int Brandbeskyt = (int)Math.Round(BrandbeskytTemp);
+
+    double t_f = tfArr[Brandbeskyt];
+
+    double t_ch = tchArr[Brandbeskyt];
+
+    double k_2 = k_2Arr[Brandbeskyt];
+
+    double BrandTidTemp = Domain(BrandTidNorm, 0, 1, -14.9999, 134.999999);
+
+    double t_req = Math.Round((BrandTidTemp - 0) / 30, 0) * 30 + 0;
+
+    LayerAmount = LayerAmount * 2 + 3; //Indfører logik således at 0 -> 3 : 1 -> 5 : 2 -> 7
+    if (LayerAmount == 7 && DoubleLayerThickness == 1) //Tjekker for om vi har dobbelt lag yderst og 7 lag
+    {
+        LayerAmount = 6;
+    }
+    else if (LayerAmount == 5 && DoubleLayerThickness == 1) //Tjekker for om vi har dobbelt lag yderst og 5 lag
+    {
+        LayerAmount = 4;
+    }
+    double ActualLayerAmount = LayerAmount; //laver en anden variabel der gemmer den "aktuelle mængde lag" bruges i brand 
+    if (LayerAmount == 6)
+    {
+        ActualLayerAmount = 7;
+    }
+    if (LayerAmount == 4)
+    {
+        ActualLayerAmount = 5;
+    }
+
+    double MatTemp = Domain(MatNorm, 0, 1, -0.499, 4.4999); // Til at finde materialet, dette vil dog formentligt blive slettet og skiftet ud med et fast variabel da man altid bruger C24
+
+    int Mat = (int)Math.Round(MatTemp); //Rundet materiale norm til nærmeste heltal
+
+    double Kat_QTemp = Domain(Kat_QNorm, 0, 1, -0.4999, 6.49999); // Mapper fra 0 - 1, så vi har 2 typer [0, 1] Kat_Q
+
+    int Kat_Q = (int)Math.Round(Kat_QTemp); // Runder til nærmeste heltal // obs bruges kun hvis dette skal blive til et excel ark 
+
+    double KKtemp = (int)Math.Round(Domain(KKNorm, 0, 1, -0.499, 2.4999)); // Konsekvensklasse bruges umidbart kun til excel 
+
+    int KK = (int)Math.Round(KKtemp); // INT konsekvensklasse
+
+    double E0 = E0Arr[Mat] * 1.05; // [MPa] Elasticitet modul for træ 
+
+    double E0k = E0kArr[Mat]; // [MPa] Elasticitet modul for træ karakteristisk 
+
+    double E90 = E90Arr[Mat]; // [MPa] Elasticitet modul for træ 90 grader 
+
+    double G0temp = GArr[Mat]; // [MPa] Forskydningsmodul for træ 
+
+    double G90temp = 100; // [MPa] Forskydningsmodul for træ 90 grader midlertidig værdi, ændres inde i goemetri check funktionen //defineres også senere i funktionen 
+
+
+    double fmk = fmkArr[Mat]; // [MPa] Karakteristisk momentstyrke for træ 
+
+    double fmd = fmk / (1.3 * G_3Arr[KK]); // [MPa] Design momentstyrke for træ
+
+    double fc0k = fc0kArr[Mat] * 1.1; // [MPa] Karakteristisk trykstyrke for træ de 1.1 er fra at det ses som et system 
+
+    double fc0d = fc0k / (1.3 * G_3Arr[KK]); // [MPa] Design trykstyrke for træ
+
+    double fc90k = fc90kArr[Mat]; // [MPa] Karakteristisk trykstyrke for træ 90 grader
+
+    double fc90d = fc90k / (1.3 * G_3Arr[KK]); // [MPa] Design trykstyrke for træ 90 grader
+
+    double ft90k = ft90kArr[Mat]; // [MPa] Karakteristisk trækstyrke for træ 90 grader
+
+    double ft90d = ft90k / (1.3 * G_3Arr[KK]); // [MPa] Design trækstyrke for træ 90 grader
+
+    double ft0k = ft0kArr[Mat] * 1.2; // [MPa] Karakteristisk trækstyrke for træ 
+
+    double ft0d = ft0k / (1.3 * G_3Arr[KK]); // [MPa] Design trækstyrke for træ
+
+    double fvk = fvkArr[Mat]; // [MPa] Karakteristisk forskydningsstyrke for træ
+
+    double fvd = fvk / (1.3 * G_3Arr[KK]); // [MPa] Design forskydningsstyrke for træ
+
+    double fxyk = 5.5; // [MPa] Karakteristisk forskydningsstyrke i planen for træ
+
+    double fxyd = 5.5 / (1.3 * G_3Arr[KK]); // [MPa] Design forskydningsstyrke i planen for træ
+
+    double ftork = ftorArr[Mat]; // [MPa] Karakteristisk torsionsstyrke for træ i planen
+
+    double ftord = ftork / (1.3 * G_3Arr[KK]); // [MPa] Design torsionsstyrke for træ i planen 
+
+
+    double Rho12 = Rho12Arr[KK]; // [kg/m^3] Massefylde for træ 
+
+    double red = Domain(RedNorm, 0, 1, 0.6, 1); // bæreevne reduktionsfaktor, bruges til at overdimensionere træ, således der er plads til samlinger 
+
+
+
+    #endregion
+
+    #region ULS
+
+    //////////////////////////////////////////////////////////////////////////
+    ////////////                                                //////////////
+    ////////////                         ULS                    //////////////
+    ////////////                                                //////////////
+    //////////////////////////////////////////////////////////////////////////
+
+    //Geometri Check bruges til at beregne de geometriske konstanter for væggen, samt finde de lag der er i væggen
+    Geometri_Check(LayerAmount, b_L, LayerThicknessXNorm, LayerThicknessYNorm, L, Hvæg, E0, E0k, E90, G90temp, G0temp, out int[] CLTLayers, out double AxNet, out double AyNet, out double IxNet, out double IyNet, out double Ix_ef, out double Iy_ef, out double Wx_Net, out double Wy_Net);
+
+    double sum = 0;
+    for (int i = 0; i < CLTLayers.Length; i++) // vi summerer lagene i vores clt for at finde bredden af væggen dette bruges til at finde egenlasten der bruges til væggen 
+    {
+        sum += CLTLayers[i];
+    }
+    double b = sum * 0.001; // [m] 
+
+    double G90 = Math.Min(30 + 17.5 * b_L / sum, 100); // G90 afhænger af vores tykkelse af væggen og bredden af stokkene, dette er en midlertidig værdi, da den skal beregnes i geometri check funktionen og brændfunktionen 
+
+    //double G0 = Math.Min(450, 650 / (1 + 2.6 * Math.Pow((sum / b_L), 1.2)));
+    double G0 = 450; // Sætter G0 til 450 MPa som en midlertidig værdi
+    double A = L * b;
+
+    //Dim_Last bruges til at beregne de dimensionerende laster i væggen, dette er de laster der er på væggen
+    //Dim_Last(Bunden, Fri, Nytte, Sne, Vind, KK, AK, Kat_Q, b, L, Hvæg, Rho12, out double NEd, out double MEd_x, out double NEd_W, out double VEd_x);
+
+
+    //slankhed bruges til at finde søjlereduktionsfaktoren for væggen iht geometrisk stabilitet
+    slankhed(AyNet, AxNet, Iy_ef, Ix_ef, Hvæg, fc0k, E0k, out double lambdarel_y, out double lambdarel_x, out double kc_y, out double kc_x);
+    //beregner normal bæreevner det vil sige normalkræft bæreevner 
+    NRd(L, AyNet, AxNet, ft0d, fc0d, ft90d, fc90d, Wy_Net, fmd, kc_y, kc_x, out double NRd_t, out double NRd_c, out double NBRd_c, out double MRd_x);
+    double t_væg = (AyNet + AxNet) / (L * 1000 * 1000);
+    //beregner stabilitet baseret på normale ligevægtbetingelser dog herunder er der constraints som hedder 405 kN træk, dette er fra rothoblaas beslagene 
+    //herudovver så er T, trækket en out parameter for helle CLT væggen hvilket vil sige det er en design parameter så den kan optimeres på i GA 
+    Stabilitet(MEd_y, NEd_W, L, AyNet, t_væg, t_dæk, forankringsafstand, Ftd, out double e, out double W_y, out double bx_ef, out double Fcd_stab);
+    //denne funktion finder den effektive bredde af mellemlaget hvis der bruges etage kryds, dette er primært en funktion der kan bruges hvis der laves en seperat model til det
+    //Men det er indført
+    double t_mulig;
+    
+    if ((MEd_y - (NEd_W * L) == 0))
+    {
+        t_mulig = 0;
+    }
+    else
+    {
+        t_mulig = (MEd_y - (NEd_W * L) * (L - W_y / 2)) / ((L - forankringsafstand) / 2);
+    }
+    //T_actual = Math.Min(t_mulig, ftd);
+    T_min = Math.Max(0, t_mulig);
+
+    T_max = Math.Min(Ftd, MEd_y / ((L / 2) - forankringsafstand));
+
+    if (T_max < Ftd)
+    {
+        Stabilitet(MEd_y, NEd_W, L, AyNet, t_væg, t_dæk, forankringsafstand, T_max, out e, out W_y, out bx_ef, out Fcd_stab);
+    }
+    Effektivbredde(NEd_W, W_y, L, Hvæg, out double B_ef);
+
+
+
+
+
+
+    //            Normal Kræft             //
+
+    //Tjekker normalkræft træk men formentligt bliver dette aldrig et problem 
+    if (NEd < 0)
+    {
+        if (Math.Abs(NEd) / NRd_t >= 1 * red)
+        {
+            errorCounter += 1;
+            stateL.Add("Normalkraft træk bæreevne ULS overskredet");
+            valid = false;
+        }
+        UtilL.Add((Math.Abs(NEd) / NRd_t) / red);
+
+    }
+
+
+
+    //Tjekker normalkræft bæreevne uden søjlevirkningen 
+    if (Math.Abs(NEd) / NRd_c >= 1 * red)
+    {
+        errorCounter += 1;
+        stateL.Add("Normalkraft tryk bæreevne ULS overskredet");
+
+        valid = false;
+    }
+
+    UtilL.Add((Math.Abs(NEd) / NRd_c) / red);
+
+    //Det skal siges denne er vi ser hele væggen som en stor søjle, dette er sjældent dimensionsgivende da det samlede tværssnit er meget stort
+    //Tjekker normalkræft søjlebæreevne 
+    if (Math.Abs(NEd) / NBRd_c >= 1 * red)
+    {
+        errorCounter += 1;
+        stateL.Add("Normalkraft tryk med søjlevirkning bæreevne ULS overskredet");
+
+        valid = false;
+    }
+
+
+
+    UtilL.Add((Math.Abs(NEd) / NBRd_c) / red);
+
+
+
+
+
+
+    //              Bøjning ved moment i x - aksen                 //
+    //Tjekker moment ortogonalt på væggensplan det vil sige moment som man normalt vil se i en skive 
+
+    //if (Math.Abs(MEd_x) / MRd_x * 1.1 >= 1 * red)
+    //{
+    //    errorCounter += 1;
+    //    stateL.Add("Normalkraft tryk med søjlevirkning bæreevne ULS overskredet");
+    //    valid = false;
+    //}
+
+    //  kombineret moment og normal kræft for udknæk omkring x - aksen //
+
+    //if (Math.Abs(MEd_x) / MRd_x * 1.1 + Math.Abs(NEd_W) / NBRd_c >= 1 * red)
+    //{
+    //    errorCounter += 1;
+    //    stateL.Add("Kombineret normalkræft med søjle virkning samt moment i omkring X akse, bæreevne er overskredet");
+    //    valid = false;
+    //}
+
+    // bæreevne for tværlag
+
+    if (Fcd_stab / (bx_ef * W_y * fc90d) > 1 * red && Tværlag == 1)
+    {
+        
+        errorCounter += 1;
+        stateL.Add("Bæreevne for tværlaget er overskrevet");
+
+        valid = false;
+    }
+
+
+    if (Tværlag == 1)
+    {
+        UtilL.Add((Fcd_stab / (bx_ef * W_y * fc90d)) / red);
+    }
+
+    // Knusning ved bunden af væg 
+
+    if (Fcd_stab / (AyNet * 0.001 * W_y / Math.Pow(L,2) * fc0d) > 1 * red)
+    {
+        errorCounter += 1;
+        stateL.Add("Knusning sker ved stabiliserende vægge ");
+
+        valid = false;
+    }
+
+    UtilL.Add((Fcd_stab / (AyNet * 0.001 * W_y / Math.Pow(L,2) * fc0d)) / red);
+
+    // Glidning
+    /*
+    if ((VEd_y / (mu * Fcd_stab)) > 1 * red)
+    {
+        errorCounter += 1;
+        stateL.Add("Glidning i bygningen  ");
+
+        valid = false;
+    }
+    */
+
+    UtilL.Add((VEd_y / (mu * Fcd_stab)) / red);
+
+    // Søjlevirkning i vægge 
+
+    if (Fcd_stab / (AyNet * 0.001 * W_y / Math.Pow(L,2) * fc0d * kc_y) > 1 * red)
+    {
+        errorCounter += 1;
+        stateL.Add("Søjlebæreevnen af den stabiliserende væg holder ikke");
+
+        valid = false;
+    }
+
+    UtilL.Add(Fcd_stab / (AyNet * 0.001 * W_y / Math.Pow(L, 2) * fc0d * kc_y) / red);
+
+    //Tjekker om den effektive bredde er positiv, det skal den være  - Dette er også mest et tjek hvis der sker noget underligt hvis Wy bliver negativ 
+    if (W_y <= 0)
+    {
+        errorCounter += 1;
+        stateL.Add("Den effektive bredde af væggen er mindre end 0");
+        valid = false;
+    }
+    UtilL.Add(1 - (W_y / L));
+
+
+    /*
+    if (W_y > L)
+    {
+        errorCounter += 1;
+        stateL.Add("Den effektive længde er større end længden af væggen");
+        UtilL.Add(2);
+        valid = false;
+    }
+
+    if (e* ftd > MEd_y)
+    {
+        errorCounter += 1;
+        stateL.Add("Trækket er større end det moment der påvirker væggen, dermed forspændt det virker ikke");
+        UtilL.Add(2);
+        valid = false;
+    }
+    */
+
+
+    // Tjekker om trækket er inden for de predefinerede grænser
+    if (Ftd > 282.1 * 1.142 && t_væg <= 0.150)
+    {
+        errorCounter += 1;
+        stateL.Add("Trækket er større end vi kan håndtere");
+        valid = false;
+    }
+
+    if (Ftd > 306 * 1.142 && t_væg >= 0.150)
+    {
+        errorCounter += 1;
+        stateL.Add("Trækket er større end vi kan håndtere");
+        valid = false;
+    }
+
+
+    if (t_væg >= 0.150)
+    {
+        UtilL.Add(Ftd / (306 * 1.142));
+    }
+    else
+    {
+        UtilL.Add(Ftd / (282.1 * 1.142));
+    }
+
+
+
+    // Forksydningsbæreevne eftervisning 
+    Skiveforskydning(VEd_y, L, b, b_L, LayerAmount, CLTLayers, out double tau_0_ef_d, out double tau_0_ef_d_2, out double tau_tor_ef_i_d);
+
+    //Brudform 1 (Limet forskydning, selvom vi ikke antager limet, så beregner vi stadig denne da den bruges senere) 
+
+    if (tau_0_ef_d / fxyd > 1 * red)
+    {
+        errorCounter += 1;
+        stateL.Add("Der er forskydningsbrud, Brudform 1 (Forskydning Limet)");
+        valid = false;
+    }
+
+    UtilL.Add((tau_0_ef_d / fxyd) / red);
+
+    //Brudform 2 (ikke limet forskydning) 
+
+    if (tau_0_ef_d_2 / fxyd > 1 * red)
+    {
+        errorCounter += 1;
+        stateL.Add("Der er forskydningsbrud, Brudform 2 (Forskydning ikke limet )");
+        valid = false;
+    }
+
+    UtilL.Add((tau_0_ef_d_2 / fxyd) / red);
+
+    //Brudform 3 (intern torsion, intern vridning i skiven for at overføre forskydningen) 
+
+    if (tau_tor_ef_i_d / ftord > 1 * red)
+    {
+        errorCounter += 1;
+        stateL.Add("Der er forskydningsbrud, Brudform 3 (Torsion)");
+        valid = false;
+    }
+
+    UtilL.Add((tau_tor_ef_i_d / ftord) / red);
+
+
+
+
+
+
+
+
+    #endregion
+
+    #region SLS 
+    //////////////////////////////////////////////////////////////////////////
+    ////////////                                                //////////////
+    ////////////                         SLS                    //////////////
+    ////////////                                                //////////////
+    //////////////////////////////////////////////////////////////////////////
+
+
+    // Berenger de Vandrette derformationer i toppen af skiven
+    //Hertil beregnes der deformationer for forskydning, moment, samlinger i top og bund. 
+
+    AntalSkruercalc(T_min, t_væg, out int AntalSkruer_Lodret);
+
+    AntalSkruercalc_Vandret(VEd_y, t_væg, out int Antalskruer_Vandret);
+
+    Vandretdeformation(VEd_y, MEd_y, t_mulig, Hvæg, G0, b, L, AyNet, AntalSkruer_Lodret, Antalskruer_Vandret, E0, out double U_v, out double U_m, out double U_t, out double U_k);
+
+    
+
+    Deformationdækkant(VEd_y, t_dæk, L, out double U_G);
+
+    double U = U_v + U_m + U_t + U_k;
+
+    o_Uv = U_v;
+    o_Um = U_m;
+    o_Ut = U_t;
+    o_Uk = U_k;
+
+    //tjekker om den totale udbøjning i toppen er under 1/300 * H 
+    if (U * 300 > Hvæg)
+    {
+        errorCounter += 1;
+        stateL.Add("Udbøjningen for den enkelte væg er for stor");
+
+        valid = false;
+    }
+
+    UtilL.Add(U * 300 / Hvæg);
+
+
+    if ((U + U_G) * 300 > Hvæg && Tværlag == 1)
+    {
+        errorCounter += 1;
+        stateL.Add("Udbøjningen for den enkelte væg er for stor (Med tværlag)");
+
+        valid = false;
+    }
+
+    if (Tværlag == 1)
+    {
+        UtilL.Add((U + U_G) * 300 / Hvæg);
+    }
+
+
+
+
+
+    #endregion
+
+    #region ALS 
+    //////////////////////////////////////////////////////////////////////////
+    ////////////                                                //////////////
+    ////////////                       ALS                      //////////////
+    ////////////                                                //////////////
+    //////////////////////////////////////////////////////////////////////////
+
+    // beregner de regningsmæssige laster i ALS 
+    //double Bunden_Brand = Bunden + (b * Rho12 * Hvæg * 0.981 / 100); //Finder den bundne last i ALS sitautionen, Her tager jeg egenvægten med
+    //double N_dom = Bunden_Brand + Fri + Nytte; //Her finder jeg den dominerende lodrette last kombination 
+    //double S_dom = Bunden_Brand + Fri + Sne + 0.9 * Nytte; //Nytte lasten bliver reduceret seperat i ABConcept motoren, så derfor gøres det ikke lige her 
+    //double V_dom = Bunden_Brand + Fri + Nytte * 0.9;
+
+    //double NEd_B = Math.Max(N_dom, Math.Max(V_dom, S_dom)); //NEd_B Her finder jeg alle de dimensions givende laster i Brandtilfældet 
+    double VEd_y_B = VEd_y * 0.2; //Dimensionerende vind i skivens plan 
+    //double VEd_x_B = Vind / 2 * Hvæg; //Dimensionerende Vind ortogonalt på skivens plan 
+    double MEd_y_B = MEd_y * 0.2; //Moment i skivens plan 
+    //double MEd_x_B = Vind / 8 * Math.Pow(Hvæg, 2); //moment ortogonalt på skivens plan 
+
+    double fmd_B = 1.15 * fmk; // [MPa]  Finder de regningsmæssige styrker ved at tage den karakteristiske 0.05 fraktil og lave til en 0.2 fraktil ved at gange med 1.15 
+    double fc0d_B = 1.15 * fc0k; // [MPa] 
+    double ft0d_B = 1.15 * ft0k; // [MPa] 
+    double fc90d_B = 1.15 * fc90k; // [MPa] 
+    double ft90d_B = 1.15 * ft90k; // [MPa] 
+    double fxyd_B = 1.15 * fxyk; // [MPa] 
+    double ftord_B = ftork * 1.15; // [MPa] 
+
+
+
+    #region d_ef
+    // Vi starter med at finde det resterende tværsnit som der kan bruges til stryke i clt væggen 
+    // beregner indbrændingsdybden, som vi må bruge 
+    d_char_function((int)Math.Round(ActualLayerAmount), CLTLayers, k_3, Beta, t_req, 0, t_ch, t_f, k_2, out double d_char_out, out double time_out);
+
+
+
+    // sætter brandsituation til 0 fordi vi kun tjekker hvor langt vi rent faktisk brander ind i første tilfælde 
+
+    // Kloner vores clt layers fordi vi skal bruge dem senere hen i en destruktiv forbindelse iht den data der bliver gemt. 
+
+    int[] CLTLayers2 = (int[])CLTLayers.Clone();
+    int[] CLTLayers3 = (int[])CLTLayers.Clone();
+    int[] CLTLayers4 = (int[])CLTLayers.Clone();
+
+    // beregner det resterende tværsnit som er tilbage efter d_char har brændt igennem 
+
+    int[] RestTværSnit = Resttværsnit(CLTLayers2, d_char_out, 1);
+
+
+    // vi finder indexet for det lag hvor der er ikke er fuldt indbrændt
+
+    int FirstLayerWithWoodLeft = FindFirstPositiveIndex(RestTværSnit, out int IsThereAnyWoodLeft);
+    if (FirstLayerWithWoodLeft < 0)
+    {
+
+        FirstLayerWithWoodLeft = 0;
+    }
+
+    //laver et tjek hvis der ikke er trætilbage, vil der ikke være styrke trivielt 
+
+    if (IsThereAnyWoodLeft == 0)
+    {
+        errorCounter += 1;
+        stateL.Add("Tværsnittet er helt brændt uden styrkeløst lag");
+        UtilL.Add(2);
+        valid = false;
+    }
+
+    // finder det styrkeløse lag iht EC5 DKNA, 
+
+    styrkeløstlag(RestTværSnit, b * 1000, CLTLayers, LayerAmount, Brandbeskyt, Brandsituation, FirstLayerWithWoodLeft, out double d_0);
+
+
+    //Sørger for der ikke komemr negative værdier ud, da de ikke kan bruges 
+
+    if (d_char_out < 0)
+    {
+        d_char_out = 0;
+    }
+
+    if (d_0 < 0)
+    {
+        d_0 = 0;
+    }
+
+    double d_ef = d_char_out + d_0;
+
+    //Beregner ResttværSnittet efter vores d_ef for at finde a, b iht DKNA for at finde den ekstra indbrænding der kommer 
+
+    int[] RestTværSnit2 = Resttværsnit(CLTLayers3, d_ef, 1);
+
+
+
+    int FirstLayerWithWoodLeft2 = FindFirstPositiveIndex(RestTværSnit2, out int IsThereAnyWoodLeft2);
+
+    if (FirstLayerWithWoodLeft2 < 0)
+    {
+
+        FirstLayerWithWoodLeft2 = 0;
+    }
+
+    // tjekker det første index hvor der er en værdi i, iht at finde det styrkeløselag iht DKNA 
+
+    if (IsThereAnyWoodLeft2 == 0)
+    {
+        errorCounter += 1;
+        stateL.Add("Tværsnittet er helt brændt med styrkeløst lag");
+        UtilL.Add(2);
+        valid = false;
+    }
+
+
+    // finder det resterende d_0 iht a,b 
+
+    styrkeløstlag2(RestTværSnit2, b * 1000, CLTLayers, LayerAmount, Brandbeskyt, Brandsituation, FirstLayerWithWoodLeft2, out double d_0_additional);
+
+    double d_ef_final = d_ef + d_0_additional;
+
+    //tjekker at hvis det er ikke er brandtid, så er der fuld stryke 
+
+    if (t_req == 0)
+    {
+        d_ef_final = 0;
+    }
+
+    //beregner det endelige Resttværsnit iht brandsituationen som er givet 
+
+    int[] RestTværSnit3 = Resttværsnit(CLTLayers4, d_ef_final, Brandsituation);
+
+    // brugest til at fylde arrays op således de alle er [7x1] arrays hvor der er fyldt ud med 0 
+
+    ArrayFill(RestTværSnit3, out int[] Paddedtværsnit);
+
+
+    BrandGeometri(LayerAmount, b_L, L, Hvæg, E0, E0k, E90, G90, G0, CLTLayers, RestTværSnit3, out double AxNet_Brand, out double AyNet_Brand, out double IxNet_Brand, out double IyNet_Brand, out double Ix_ef_Brand, out double Iy_ef_Brand, out double Wx_Net_Brand, out double Wy_Net_Brand);
+
+    #endregion
+
+    // Beregner bæreevner iht brandsituationen 
+    //Slankehed beregnes hvor vi bruger E0_20 modulet for brandsituationen, herudover bruger vi det resterende tværsnit fra brandsituationen 
+    slankhed(AyNet_Brand, AxNet_Brand, Iy_ef_Brand, Ix_ef_Brand, Hvæg, fc0d_B, E0k * 1.15, out double lambdarel_y_Brand, out double lambdarel_x_Brand, out double kc_y_Brand, out double kc_x_Brand);
+    // Vi beregner NRd fra brandsituationen med det resterende tværsnit der er tilabge 
+    NRd(L, AyNet_Brand, AxNet_Brand, ft0d_B, fc0d_B, ft90d_B, fc90d_B, Wy_Net_Brand, fmd_B, kc_y_Brand, kc_x_Brand, out double NRd_t_Brand, out double NRd_c_Brand, out double NBRd_c_Brand, out double MRd_x_Brand);
+    double t_væg_Brand = (AyNet_Brand + AxNet_Brand) / (L * 1000 * 1000);
+    //Beregner stabilitet i brandsituationen 
+    Stabilitet(MEd_y_B, NEd_B, L, AyNet_Brand, t_væg_Brand, t_dæk, forankringsafstand, ft0d_B, out double e_Brand, out double W_y_Brand, out double bx_ef_Brand, out double fcd_stab_Brand);
+
+    double t_mulig_B = (MEd_y_B - (NEd_B * L) * (L - W_y_Brand / 2)) / ((L - forankringsafstand) / 2);
+
+    double T_min_B = Math.Max(0, t_mulig);
+
+    double T_max_B = Math.Min(Ftd, MEd_y_B / ((L / 2) - forankringsafstand));
+
+    if (T_max_B < Ftd)
+    {
+        Stabilitet(MEd_y_B, NEd_B, L, AyNet_Brand, t_væg_Brand, t_dæk, forankringsafstand, T_max_B, out e_Brand, out W_y_Brand, out bx_ef_Brand, out fcd_stab_Brand);
+    }
+
+    //beregner den tilhørende effektive bredde der fremkommer i brandsituationen 
+    Effektivbredde(NEd_B, W_y_Brand, L, Hvæg, out double B_ef_Brand);
+    //beregner de regningsmæssige forskydningsspændering der kommer i planen
+    Skiveforskydning(VEd_y_B, L, b, b_L, LayerAmount, RestTværSnit3, out double tau_0_ef_d_Brand, out double tau_0_ef_d_2_Brand, out double tau_tor_ef_i_d_Brand);
+
+
+
+
+
+    //            Normal Kræft             //
+
+    if (NEd_B < 0)
+    {
+        if (Math.Abs(NEd_B) / NRd_t_Brand >= 1 * red)
+        {
+            errorCounter += 1;
+            stateL.Add("Normalkraft træk bæreevne ULS overskredet - Brand");
+
+            valid = false;
+        }
+        UtilL.Add((Math.Abs(NEd_B) / NRd_t_Brand) / red);
+    }
+
+
+
+    if (Math.Abs(NEd_B) / NRd_c_Brand >= 1 * red)
+    {
+        errorCounter += 1;
+        stateL.Add("Normalkraft tryk bæreevne ULS overskredet - Brand");
+
+        valid = false;
+    }
+
+    UtilL.Add((Math.Abs(NEd_B) / NRd_c_Brand) / red);
+
+
+    if (Math.Abs(NEd_B) / NBRd_c_Brand >= 1 * red)
+    {
+        errorCounter += 1;
+        stateL.Add("Normalkraft tryk med søjlevirkning bæreevne ULS overskredet - Brand");
+
+        valid = false;
+    }
+
+    UtilL.Add((Math.Abs(NEd_B) / NBRd_c_Brand) / red);
+
+
+
+
+
+    //              Bøjning ved moment i x - aksen                 //
+
+    //if (Math.Abs(MEd_x_B) / MRd_x_Brand >= 1 * red)
+    //{
+    //    errorCounter += 1;
+    //    stateL.Add("Normalkraft tryk med søjlevirkning bæreevne ULS overskredet - Brand ");
+    //    valid = false;
+    //}
+
+    //  kombineret moment og normal kræft for udknæk omkring x - aksen //
+
+    //if (Math.Abs(MEd_x_B) / MRd_x_Brand + Math.Abs(NEd_B) / NBRd_c_Brand >= 1 * red)
+    //{
+    //    errorCounter += 1;
+    //    stateL.Add("Kombineret normalkræft med søjle virkning samt moment i omkring X akse, bæreevne er overskredet - Brand");
+    //    valid = false;
+    //}
+
+    //stabilitet i brandsituationen 
+
+    // bæreevne for tværlag
+
+    if (fcd_stab_Brand / (bx_ef_Brand * W_y_Brand * fc90d_B) > 1 * red && Tværlag == 1)
+    {
+        errorCounter += 1;
+        stateL.Add("Bæreevne for tværlaget er overskrevet - Brand");
+        valid = false;
+    }
+    if (Tværlag == 1)
+    {
+        UtilL.Add((fcd_stab_Brand / (bx_ef_Brand * W_y_Brand * fc90d_B)) / red);
+    }
+
+
+
+    // Knusning ved bunden af væg 
+
+    if (fcd_stab_Brand / (AyNet_Brand / L * 0.001 * W_y_Brand * fc0d_B) > 1 * red)
+    {
+        errorCounter += 1;
+        stateL.Add("Knusning sker ved stabiliserende vægge - Brand ");
+
+        valid = false;
+    }
+
+    UtilL.Add((fcd_stab_Brand / (AyNet_Brand / L * 0.001 * W_y_Brand * fc0d_B)) / red);
+
+    // Glidning
+    /*
+    if ((VEd_y_B / (mu * fcd_stab_Brand)) > 1 * red)
+    {
+        errorCounter += 1;
+        stateL.Add("Der sker Glidning i bygningen - Brand ");
+
+        valid = false;
+    }
+    */
+    UtilL.Add((VEd_y_B / (mu * fcd_stab_Brand)) / red);
+
+    // Søjlevirkning i vægge 
+
+    if (fcd_stab_Brand / (AyNet_Brand / L * 0.001 * B_ef_Brand * fc0d_B * kc_y_Brand) > 1 * red)
+    {
+        errorCounter += 1;
+        stateL.Add("Søjlebæreevnen af den stabiliserende væg holder ikke - Brand");
+
+        valid = false;
+    }
+
+    UtilL.Add((fcd_stab_Brand / (AyNet_Brand / L * 0.001 * B_ef_Brand * fc0d_B * kc_y_Brand)) / red);
+
+
+
+    if (W_y_Brand <= 0)
+    {
+        errorCounter += 1;
+        stateL.Add("Den effektive bredde af væggen er mindre end 0 - Brand");
+        valid = false;
+    }
+    UtilL.Add(1 - (W_y_Brand / L));
+
+    // Tjekker forskydningsbæreevner 
+
+    if (tau_0_ef_d_Brand / fxyd_B > 1 * red)
+    {
+        errorCounter += 1;
+        stateL.Add("Der er forskydningsbrud, Brudform 1 (Forskydning Limet) - Brand ");
+
+        valid = false;
+    }
+
+    UtilL.Add((tau_0_ef_d_Brand / fxyd_B) / red);
+
+    //Brudform 2 
+
+    if (tau_0_ef_d_2_Brand / fxyd_B > 1 * red)
+    {
+        errorCounter += 1;
+        stateL.Add("Der er forskydningsbrud, Brudform 2 (Forskydning ikke limet ) - Brand");
+
+        valid = false;
+    }
+
+    UtilL.Add((tau_0_ef_d_2_Brand / fxyd_B) / red);
+
+
+    //Brudform 3 
+
+    if (tau_tor_ef_i_d_Brand / ftord_B > 1 * red)
+    {
+        errorCounter += 1;
+        stateL.Add("Der er forskydningsbrud, Brudform 3 (Torsion) - Brand");
+
+        valid = false;
+    }
+
+    UtilL.Add((tau_tor_ef_i_d_Brand / ftord_B) / red);
+    #endregion
+
+
+    // TODO: Lav pris beregningsmodeller her for beslag + antal skruer, herudover skal vi også have priser på CLT 
+    PrisBeregner(Ftd, VEd_y, L, Hvæg, LayerAmount, DoubleLayerThickness, t_væg, Brandbeskyt, CLTLayers, out double Pris);
+
+    CO2Beregner(Ftd, VEd_y, L, Hvæg, t_væg, Brandbeskyt, CLTLayers, out double CO2);
+
+    if (StandardDimList.Any(arr => CLTLayers.All(item => arr.Contains(item))) && StandardDim == 1)
+    {
+        errorCounter += 1;
+        stateL.Add("Ikke standard dim");
+        valid = false;
+    }
+
+
+    CLTOpbygRes = RestTværSnit3;
+    oStateL = stateL;
+    oUtilL = UtilL;
+    oErrorCounter = errorCounter;
+    oCO2_m = CO2;
+    oPris_m = Pris;
+
+
+
+
+
+
+    return valid;
+    // --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+}
+
+
+
+public static bool CLT_Wall_Bygbarhed_Util_Bachelor(double NEd, double NEd_W, double NEd_B, double MEd_y, double VEd_y, double LNorm, double HvægNorm, double T, double LayerAmountNorm, double LayerThicknessXNorm, double LayerThicknessYNorm, double DoubleLayerThicknessNorm, double MatNorm, double BrandbeskytNorm, double BrandTidNorm, double KKNorm, double AKNorm, double Kat_QNorm, double RedNorm, double Standarddim, out List<string> oStateL, out List<double> oUtilL, out double T_min, out double T_max, out double o_Uv, out double o_Um, out double o_Ut, out double o_Uk, out int[] oCLTOpbygRes, out int oErrorCounter, out double oCO2_m, out double oPris_m, out int oPartitions)
+{
+    double Partitions = 1;
+    double L = Domain(LNorm, 0, 1, 1, 10);
+    double Hvæg = Domain(HvægNorm, 0, 1, 2, 12);
+    if (L >= 4 && Hvæg >= 4)
+    {
+        Partitions = Math.Ceiling(L / 4);
+    }
+    LNorm = LNorm / Partitions;
+    NEd = NEd;
+    NEd_W = NEd_W;
+    NEd_B = NEd_B;
+    MEd_y = MEd_y / Partitions;
+    VEd_y = VEd_y / Partitions;
+
+
+
+    bool Valid = true;
+    bool iValid = CLT_Wall_Util_Bachelor(NEd, NEd_W, NEd_B, MEd_y, VEd_y, LNorm, HvægNorm, T, LayerAmountNorm, LayerThicknessXNorm, LayerThicknessYNorm, DoubleLayerThicknessNorm, MatNorm, BrandbeskytNorm, BrandTidNorm, KKNorm, AKNorm, Kat_QNorm, RedNorm, Standarddim, out List<string> StateL, out List<double> UtilL, out T_min, out T_max, out o_Uv, out o_Um, out o_Ut, out o_Uk, out int[] CLTOpbygRes, out int ErrorCounter, out double CO2_m, out double Pris_m);
+    oErrorCounter = ErrorCounter;
+    oStateL = StateL;
+    oCLTOpbygRes = CLTOpbygRes;
+    oCO2_m = CO2_m * Partitions;
+    oPris_m = Pris_m * Partitions;
+    oUtilL = UtilL;
+    Valid = iValid;
+    oPartitions = (int)Partitions;
+    return Valid;
+}
