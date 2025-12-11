@@ -1,0 +1,369 @@
+        else
+        {
+            
+            // klargøring til capacity
+            //starter med at implementere capacity 
+            //starter med at "extraction" af vores input variable 
+            List<double> maxULSperWall = new List<double>();
+            List<double> ElasticStiffnessperWall = new List<double>();
+            
+            #region Beregning af stivheder
+            for(int i=0;i<wallL.Count;i++)
+            {
+                
+                
+                if (wallL[i].material.matIndex == 0)
+                {
+                double V_Total = wallL[i].V[0] + wallL[i].V[1] + wallL[i].V[2] + wallL[i].V[3] + wallL[i].V[4];
+                double M_Total = wallL[i].M[0] + wallL[i].M[1] + wallL[i].M[2] + wallL[i].M[3] + wallL[i].M[4];
+        
+                
+                
+                double gBunden_k    = wallL[i].DLextra + wallL[i].DL;
+                double gFri_k       = wallL[i].SDL;
+                double q_k          = wallL[i].LL;
+                double s_k          = wallL[i].S;
+                double QkatNorm     = 0;
+                double KFiNorm      = 0.5;
+                double VEd          = V_Total * 1.5;
+                double MEd          = M_Total * 1.5;
+                double brandTidNorm = 0;
+                double HvægParam    = Hvæg;
+                double LsFakNorm    = 0;
+                double Lvæg         = wallL[i].lengthBot;
+                double utilLimitNorm = 1 ;
+                double MatNorm      = wallL[i].fck;
+                double AsNorm       = wallL[i].asNorm;
+                double tvægNorm     = 0.3;
+                double coverNorm    = 0.9;
+                double turnKorNorm  = 0.9;
+                double TdAsNorm     = 0.7;
+
+                bool Prior = ABCore.Evaluator.ABC_RC_Wall.RC_Wall_norm(
+                gBunden_k,
+                gFri_k,
+                q_k,
+                s_k,
+                QkatNorm,
+                KFiNorm,
+                VEd,
+                MEd,
+                brandTidNorm,
+                HvægParam,
+                LsFakNorm,
+                Lvæg,
+                utilLimitNorm,
+                MatNorm,
+                AsNorm,
+                tvægNorm,
+                coverNorm,
+                turnKorNorm,
+                TdAsNorm,
+                out List<string> oStateL,
+                out int oErrorCount,
+                out double oPris_m2,
+                out double oPrisNorm,
+                out double oCO2_m2,
+                out double oCO2norm,
+                out double deflection1
+                 );
+                
+                bool Post = ABCore.Evaluator.ABC_RC_Wall.RC_Wall_norm(
+                gBunden_k,
+                gFri_k,
+                q_k,
+                s_k,
+                QkatNorm,
+                KFiNorm,
+                VEd + 1,
+                MEd + 1*Hvæg,
+                brandTidNorm,
+                HvægParam,
+                LsFakNorm,
+                Lvæg,
+                utilLimitNorm,
+                MatNorm,
+                AsNorm,
+                tvægNorm,
+                coverNorm,
+                turnKorNorm,
+                TdAsNorm,
+                out List<string> oStateL2,
+                out int oErrorCount2,
+                out double oPris_m22,
+                out double oPrisNorm2,
+                out double oCO2_m22,
+                out double oCO2norm2,
+                out double deflection2
+                 );
+
+                Console.WriteLine($"wall {i} - RC: Elastic Stiffness = {1/(deflection2 - deflection1)}");
+                ElasticStiffnessperWall.Add(1/(deflection2 - deflection1));
+
+                double lowULS  = 0.0;
+                double highULS = 2500;  // or a higher upper bound if needed
+                double bestULS = 0.0;
+
+                double bestMEdbonusNorm = 0.0;
+                double bestMEdTotalNorm = 0.0;
+                
+                for (int iter = 0; iter < 50; iter++)  // 25 iterations ~ good precision
+                {
+                     double mid_ULS = (lowULS + highULS) / 2.0;
+                     double MEdbonus = mid_ULS * Hvæg;
+                     double MEdTotal = MEdbonus + MEd;
+
+                     bool Valid_ULS_i = ABCore.Evaluator.ABC_RC_Wall.RC_Wall_norm(
+                    gBunden_k,
+                    gFri_k,
+                    q_k,
+                    s_k,
+                    QkatNorm,
+                    KFiNorm,
+                    VEd,
+                    MEdTotal,
+                    brandTidNorm,
+                    HvægParam,
+                    LsFakNorm,
+                    Lvæg,
+                    utilLimitNorm,
+                    MatNorm,
+                    AsNorm,
+                    tvægNorm,
+                    coverNorm,
+                    turnKorNorm,
+                    TdAsNorm,
+                    out List<string> oStateL3,
+                    out int oErrorCount3,
+                    out double oPris_m23,
+                    out double oPrisNorm3,
+                    out double oCO2_m23,
+                    out double oCO2norm3,
+                    out double deflection13
+                    );
+
+                    if (Valid_ULS_i) 
+                    {
+                        lowULS = mid_ULS;
+                        bestULS = mid_ULS;
+                    }
+                    else
+                    {
+                        highULS = mid_ULS;
+                    }
+                }
+                maxULSperWall.Add(bestULS);   
+                Console.WriteLine($"wall {i} - RC: bestULS = {bestULS}");              
+                }
+                else
+                {
+                    double DL = wallL[i].DL;
+                    double DLExtra = wallL[i].DLextra;
+                    double SDL = wallL[i].SDL;
+                    double LL = wallL[i].LL;
+                    double S = wallL[i].S;
+
+                    double NEd = (DL+DLExtra + SDL) + 1.5 * (LL) + 0.45 * S;
+                    
+                    double NEd_W = 0.9 * (DL + DLExtra);
+                    
+                    double NEd_B = (DL + DLExtra + SDL);
+
+                    double V_Total = wallL[i].V[0] + wallL[i].V[1] + wallL[i].V[2] + wallL[i].V[3] + wallL[i].V[4];
+                    double M_Total = wallL[i].M[0] + wallL[i].M[1] + wallL[i].M[2] + wallL[i].M[3] + wallL[i].M[4];
+                    
+                    double MEd_y = M_Total;
+
+                    double VEd_y = V_Total;
+                    
+
+                    double L_Norm = wallL[i].lengthBot;
+                    double Hvæg_Norm = Hvæg;
+                    double MatNorm = 0.7; // Denne faktor er låst 
+                    double BrandTidNorm = 0;
+                    double KKNorm = 0.5;
+                    double AKNorm = 0;
+                    double Kat_QNorm = 0;
+                    double RedNorm = 0;
+
+                    double LayerAmountNorm = 1;
+                    double LayerThicknessXNorm = 1;
+                    double LayerThicknessYNorm = 1;
+                    double DoubleLayerThicknessNorm = 0;
+                    double T = 1;
+                    double BrandbeskytNorm = 1;
+
+                    double price_m = 0;
+                    double CO2_m = 0;
+                    List<string> oStateL = new List<string>();
+                    int oErrorCounter = 0;
+
+                    bool isValid = ABCore.Evaluator.ABC_CLT_Wall.CLT_Wall_Util_Bachelor(
+                    NEd, NEd_W, NEd_B, (MEd_y), (VEd_y),
+                    L_Norm, Hvæg_Norm, T, LayerAmountNorm,
+                    LayerThicknessXNorm, LayerThicknessYNorm, DoubleLayerThicknessNorm,
+                    MatNorm, BrandbeskytNorm, BrandTidNorm, KKNorm, AKNorm,
+                    Kat_QNorm, RedNorm, 0,
+                    out List<string> oStateL_1, out List<double> Utilization, out double T_min_T, out double T_max_T,
+                    // capture deformation components:
+                    out double Uv_local, out double Um_local, out double Ut_local, out double Uk_local,
+                    out int[] CLTOpbygRes, out int ErrorCounter,
+                    out double CO2_m_local, out double price_m_local);
+                    
+                    bool isValid2 = ABCore.Evaluator.ABC_CLT_Wall.CLT_Wall_Util_Bachelor(
+                    NEd, NEd_W, NEd_B, (MEd_y+1*Hvæg), (VEd_y+1),
+                    L_Norm, Hvæg_Norm, T, LayerAmountNorm,
+                    LayerThicknessXNorm, LayerThicknessYNorm, DoubleLayerThicknessNorm,
+                    MatNorm, BrandbeskytNorm, BrandTidNorm, KKNorm, AKNorm,
+                    Kat_QNorm, RedNorm, 0,
+                    out List<string> oStateL_2, out List<double> Utilization2, out double T_min_T2, out double T_max_T2,
+                    // capture deformation components:
+                    out double Uv_local2, out double Um_local2, out double Ut_local2, out double Uk_local2,
+                    out int[] CLTOpbygRes2, out int ErrorCounter2,
+                    out double CO2_m_local2, out double price_m_local2);
+
+                    double U_total2 = Uv_local2+Um_local2+Ut_local2+Uk_local2;
+                    double U_total = Uv_local+Um_local+Ut_local+Uk_local;
+                    Console.WriteLine(U_total2);
+
+                    Console.WriteLine($"wall {i} - CLT: Elastic Stiffness = {1/(U_total2-U_total)}");
+                    ElasticStiffnessperWall.Add(1/(U_total2-U_total));
+
+                                // -------- CLT optimisation (binary search on extra moment & shear) --------
+                    double lowULS_CLT = 0.0;
+                    double highULS_CLT = 1500;   // same upper bound as RC, adjust if needed
+                    double bestULS_CLT = 0.0;
+                    
+                    for (int iter = 0; iter < 50; iter++)
+                    {
+                        double mid_ULS = (lowULS_CLT + highULS_CLT) / 2.0;
+
+                        double MEdbonus = mid_ULS * Hvæg;   // extra moment
+                        double Vbonus = mid_ULS;            // extra shear
+
+                        bool isValid_mid = ABCore.Evaluator.ABC_CLT_Wall.CLT_Wall_Util_Bachelor(
+                            NEd, NEd_W, NEd_B,
+                            MEd_y + MEdbonus,
+                            VEd_y + Vbonus,
+                            L_Norm, Hvæg_Norm, T, LayerAmountNorm,
+                            LayerThicknessXNorm, LayerThicknessYNorm, DoubleLayerThicknessNorm,
+                            MatNorm, BrandbeskytNorm, BrandTidNorm, KKNorm, AKNorm,
+                            Kat_QNorm, RedNorm, 0,
+                            out List<string> oStateL_mid, out List<double> Util_mid, out double T_min_T_mid, out double T_max_T_mid,
+                            out double Uv_mid, out double Um_mid, out double Ut_mid, out double Uk_mid,
+                            out int[] CLTOpbygRes_mid, out int ErrorCounter_mid,
+                            out double CO2_m_mid, out double price_m_mid
+                        );
+
+                        if (isValid_mid)
+                        {
+                            lowULS_CLT = mid_ULS;
+                            bestULS_CLT = mid_ULS;
+                        }
+                        else
+                        {
+                            highULS_CLT = mid_ULS;
+                        }
+                    }
+                    
+
+                    maxULSperWall.Add(bestULS_CLT);
+                    Console.WriteLine($"wall {i} - CLT: bestULS = {bestULS_CLT}");
+
+                    // NEW: print the oState for the last invalid closest to the largest valid
+
+                        bool isValid_final = ABCore.Evaluator.ABC_CLT_Wall.CLT_Wall_Util_Bachelor(
+                            NEd, NEd_W, NEd_B,
+                            MEd_y + (bestULS_CLT + 1) * Hvæg,
+                            VEd_y + (bestULS_CLT + 1),
+                            L_Norm, Hvæg_Norm, T, LayerAmountNorm,
+                            LayerThicknessXNorm, LayerThicknessYNorm, DoubleLayerThicknessNorm,
+                            MatNorm, BrandbeskytNorm, BrandTidNorm, KKNorm, AKNorm,
+                            Kat_QNorm, RedNorm, 0,
+                            out List<string> oStateL_final, out List<double> Util_final, out double T_min_T_final, out double T_max_T_final,
+                            out double Uv_v, out double Um_final, out double Ut_final, out double Uk_final,
+                            out int[] CLTOpbygRes_final, out int ErrorCounter_final,
+                            out double CO2_m_final, out double price_m_final
+                                                    );
+
+
+                    
+                }
+                #endregion
+
+                
+
+
+
+
+
+
+            }   // loop i END
+
+            //List<double> maxULSperWall = new List<double>();
+            //List<double> ElasticStiffnessperWall = new List<double>();
+            double sumULS = 0.0;
+            for (int k = 0; k < maxULSperWall.Count; k++)
+            {
+                sumULS += maxULSperWall[k];
+            }
+            double sumElasticStiffness = 0.0;
+            for (int k = 0; k < ElasticStiffnessperWall.Count; k++)
+            {
+                sumElasticStiffness += ElasticStiffnessperWall[k];
+            }
+
+            double k_plastic_total_x = 0;
+            double k_plastic_total_y = 0;
+            double k_elastic_total_x = 0;
+            double k_elastic_total_y = 0;
+            
+            for(int i=0;i<wallL.Count;i++)
+            {
+                
+                double k_Plastic_norm_y = maxULSperWall[i]*Math.Pow(wallL[i].SyGeometric/(0.15),0.5);
+                double k_Plastic_norm_x = maxULSperWall[i]*Math.Pow(wallL[i].SxGeometric/(0.15),0.5);
+                double k_Elastic_norm_y = ElasticStiffnessperWall[i]*Math.Pow(wallL[i].SyGeometric/(0.15),0.5);
+                double k_Elastic_norm_x = ElasticStiffnessperWall[i]*Math.Pow(wallL[i].SxGeometric/(0.15),0.5);
+
+                k_plastic_total_y += k_Plastic_norm_y;
+                k_plastic_total_x += k_Plastic_norm_x;
+
+                k_elastic_total_y += k_Elastic_norm_y;
+                k_elastic_total_x += k_Elastic_norm_x;
+            }
+
+
+
+            for(int i=0;i<wallL.Count;i++)
+            {
+                double K_plastic_y = 0;
+                double K_plastic_x = 0;
+                // Plastic Stiffness
+                if (maxULSperWall[i] == 0)
+                {
+                    K_plastic_y = 0;
+
+                    K_plastic_x = 0;
+                }
+                else 
+                {
+                    K_plastic_y = maxULSperWall[i]*Math.Pow(wallL[i].SyGeometric/(0.15),0.5)/k_plastic_total_y;
+
+                    K_plastic_x = maxULSperWall[i]*Math.Pow(wallL[i].SxGeometric/(0.15),0.5)/k_plastic_total_x;
+                }
+                
+                
+                // ELastic Stiffness
+                double K_elastic_y = ElasticStiffnessperWall[i]*Math.Pow(wallL[i].SyGeometric/(0.15),0.5)/k_elastic_total_y;
+
+                double K_elastic_x = ElasticStiffnessperWall[i]*Math.Pow(wallL[i].SxGeometric/(0.15),0.5)/k_elastic_total_x;
+                SyL.Add(Alpha * K_plastic_y + (1-Alpha) * K_elastic_y);
+                Console.WriteLine($"alpha approach y = {Alpha * K_plastic_y + (1-Alpha) * K_elastic_y}");
+                SxL.Add(Alpha * K_plastic_x + (1-Alpha) * K_elastic_x);
+                Console.WriteLine($"alpha approach x = {Alpha * K_plastic_x + (1-Alpha) * K_elastic_x}");
+                ptMidtL.Add(wallL[i].ptCenter);
+
+            }
+
+        }
